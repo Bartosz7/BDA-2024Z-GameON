@@ -6,7 +6,7 @@ and preprocesses the JSON data, and writes it to BigQuery for further use.
 """
 import json
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.options.pipeline_options import (PipelineOptions, StandardOptions, GoogleCloudOptions)
 
 # Define your project and Pub/Sub topic information
 PROJECT_ID = 'bda-gameon-demo'
@@ -28,12 +28,12 @@ def parse_and_flatten(json_data):
             drivers = lap_details.get('drivers', {})
             for driver_id, driver_details in drivers.items():
                 yield {
-                    "race_id": int(race_id),
-                    "lap_id": int(lap_id),
-                    "driver_id": int(driver_id),
+                    "raceId": int(race_id),
+                    "driverId": int(driver_id),
+                    "lap": int(lap_id),
                     "position": driver_details.get('position'),
                     "time": driver_details.get('time'),
-                    "milliseconds": driver_details.get('milliseconds')
+                    "miliseconds": driver_details.get('milliseconds')
                 }
 
 
@@ -43,12 +43,20 @@ def run():
     options = PipelineOptions()
     options.view_as(StandardOptions).streaming = True  # Enables streaming mode
 
+    # Set Google Cloud specific options
+    gcp_options = options.view_as(GoogleCloudOptions)
+    gcp_options.project = 'bda-gameon-demo'  # Your GCP project ID
+    gcp_options.region = 'us-central1'  # Replace with your desired region
+    gcp_options.job_name = 'f1-dataflow-pipeline-1'  # Unique job name
+    gcp_options.staging_location = 'gs://gameon-bucket-1/staging'  # Replace with your GCS bucket
+    gcp_options.temp_location = 'gs://gameon-bucket-1/temp'  # Replace with your GCS bucket
+
     with beam.Pipeline(options=options) as p:
         # Laps data pipeline
         (
             p
             | 'Read from Pub/Sub' >> beam.io.ReadFromPubSub(topic=TOPIC_ID)
-            | 'Parse JSON' >> beam.Map(parse_and_flatten)
+            | 'Parse JSON' >> beam.FlatMap(parse_and_flatten)
             | 'Write to BigQuery laps Table' >> beam.io.WriteToBigQuery(
                 f'{PROJECT_ID}:{DATASET_ID}.laps',
                 schema='raceId:INTEGER, driverId:INTEGER, lap:INTEGER, position:INTEGER, time:STRING, milliseconds:INTEGER',
@@ -56,6 +64,8 @@ def run():
                 create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED
             )
         )
+
+    p.run()
 
 
 if __name__ == '__main__':
