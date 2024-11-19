@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 import pandas as pd
+import numpy as np
 
 app = FastAPI()
 
@@ -25,6 +26,33 @@ def laps(raceId, lap):
                 }
             }
         }
+    except:
+        out_dict = "Invalid data provided."
+
+    return out_dict
+
+@app.get("/laps/{raceId}")
+def all_laps(raceId):
+    df = pd.read_csv("data/lap_times.csv")
+    df = df[(df["raceId"] == int(raceId))]
+    out_dict = {}
+    out_dict["races"] = {
+        f"{raceId}": {
+            "laps":{}
+        }
+    }
+    try:
+        for lap in np.unique(df.lap):
+            lap_df = df[(df["lap"] == lap)]
+            given_lap = {}
+            for _, driver in lap_df.iterrows():
+                given_lap[driver.driverId] = {
+                    "position": driver.position,
+                    "milliseconds": driver.milliseconds
+                }
+
+            out_dict["races"][f"{raceId}"]["laps"][f"{lap}"] = {"drivers": given_lap}
+
     except:
         out_dict = "Invalid data provided."
 

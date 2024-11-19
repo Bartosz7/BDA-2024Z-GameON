@@ -1,5 +1,5 @@
 """
-pubsub_f1.py
+dataflow_f1.py
 
 Defines a Dataflow pipeline that reads messages from a Pub/Sub topic, parses
 and preprocesses the JSON data, and writes it to BigQuery for further use.
@@ -11,7 +11,7 @@ from apache_beam.options.pipeline_options import (PipelineOptions, StandardOptio
 # Define your project and Pub/Sub topic information
 PROJECT_ID = 'bda-gameon-demo'
 TOPIC_ID = f'projects/{PROJECT_ID}/topics/formula-1-topic'
-OUTPUT_TABLE = f'{PROJECT_ID}:post_data_test.posts'  # Replace with your dataset and table name
+OUTPUT_TABLE = f'{PROJECT_ID}:post_data_test.posts'
 DATASET_ID = "f1"
 
 
@@ -32,7 +32,6 @@ def parse_and_flatten(json_data):
                     "driverId": int(driver_id),
                     "lap": int(lap_id),
                     "position": driver_details.get('position'),
-                    "time": driver_details.get('time'),
                     "miliseconds": driver_details.get('milliseconds')
                 }
 
@@ -59,7 +58,7 @@ def run():
             | 'Parse JSON' >> beam.FlatMap(parse_and_flatten)
             | 'Write to BigQuery laps Table' >> beam.io.WriteToBigQuery(
                 f'{PROJECT_ID}:{DATASET_ID}.laps',
-                schema='raceId:INTEGER, driverId:INTEGER, lap:INTEGER, position:INTEGER, time:STRING, milliseconds:INTEGER',
+                schema='raceId:INTEGER, driverId:INTEGER, lap:INTEGER, position:INTEGER, milliseconds:INTEGER',
                 write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
                 create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED
             )
