@@ -79,8 +79,9 @@ def races(raceId):
 # football api
 @app.get("/events/{matchId}/{start_time}/{end_time}")
 def events(matchId, start_time, end_time):
-    df = pd.read_csv("data/events.csv")
-    df = df[(df["matchId"] == int(matchId)) & (df["eventSec"] >= int(start_time)) & (df["eventSec"] <= int(end_time))]
+    df = pd.read_parquet("data/events.parquet")
+    df = df.fillna('')
+    df = df[(df["matchId"] == int(matchId)) & (df["eventSec"] >= float(start_time)) & (df["eventSec"] <= float(end_time))]
     out_dict = {}
 
     try:
