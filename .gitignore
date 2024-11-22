@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 
 api/data/
+api/data_to_process/
