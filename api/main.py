@@ -1,8 +1,22 @@
 from fastapi import FastAPI
 import pandas as pd
 import numpy as np
+import json
+from pathlib import Path
 
 app = FastAPI()
+
+# cricket api
+@app.get("/cricket/{cricketId}/{inning}/{over}")
+def cricket_over(cricketId, inning, over):
+    file_path = Path(f"data/cricket_{cricketId}_{inning}_{over}.json")
+    if file_path.exists():
+        with open(file_path, "r") as f:
+            data = json.load(f)
+        return data
+    
+    return "Invalid data provided."
+
 
 @app.get("/laps/{raceId}/{lap}")
 def laps(raceId, lap):
