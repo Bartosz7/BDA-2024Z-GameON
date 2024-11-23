@@ -1,0 +1,114 @@
+{
+  "components": {
+    "comp-load-and-preprocess": {
+      "executorLabel": "exec-load-and-preprocess",
+      "inputDefinitions": {
+        "parameters": {
+          "race_id": {
+            "parameterType": "NUMBER_INTEGER"
+          }
+        }
+      }
+    },
+    "comp-train-model": {
+      "executorLabel": "exec-train-model"
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-load-and-preprocess": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "load_and_preprocess"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef load_and_preprocess(\n    race_id: int,\n):\n    import requests\n    from vertex_utils import (\n        prepare_df_from_json,\n        prepare_aggregations,\n        save_historic_to_big_query\n    )\n\n    API_BASE_URL = \"https://big-data-project-api-248863766350.europe-west3.run.app/laps\"\n    api_url = f\"{API_BASE_URL}/{race_id}\"\n    response = requests.get(api_url)\n    data = response.json()\n\n    print(f\"Gathering data for race: {race_id}...\")\n    df = prepare_df_from_json(data)\n\n    print(\"Preparing aggregations...\")\n    aggregations = prepare_aggregations(df)\n\n    aggregations = aggregations.drop([\"race_id\", \"milliseconds\"], axis=1)\n\n    print(\"Saving aggregations to BigQuery...\")\n    save_historic_to_big_query(aggregations)\n\n"
+          ],
+          "image": "europe-west3-docker.pkg.dev/bda-gameon-demo/vertex/base_f1_container:latest"
+        }
+      },
+      "exec-train-model": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "train_model"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef train_model():\n    from google.cloud import bigquery\n\n    query = \"\"\"    \n        CREATE OR REPLACE MODEL f1.xgboost_model\n        OPTIONS(model_type='BOOSTED_TREE_REGRESSOR', \n                input_label_cols=['final_position']) AS\n        SELECT \n        lap,\n        driver,\n        position,\n        mean_position_up_to_lap,\n        std_position_up_to_lap,\n        min_position_up_to_lap,\n        last_5_laps_mean_position,\n        final_position\n        FROM f1.historic_data;\n    \"\"\"\n\n    client = bigquery.Client(project=\"bda-gameon-demo\")\n    client.query(query).result()\n\n"
+          ],
+          "image": "europe-west3-docker.pkg.dev/bda-gameon-demo/vertex/base_f1_container:latest"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "Pipeline responsible for batch processing and model training",
+    "name": "batch-processing"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "load-and-preprocess": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-load-and-preprocess"
+          },
+          "inputs": {
+            "parameters": {
+              "race_id": {
+                "componentInputParameter": "race_id"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Load and Preprocess Data"
+          }
+        },
+        "train-model": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-train-model"
+          },
+          "dependentTasks": [
+            "load-and-preprocess"
+          ],
+          "taskInfo": {
+            "name": "Model training"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "race_id": {
+          "defaultValue": 1.0,
+          "isOptional": true,
+          "parameterType": "NUMBER_INTEGER"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.10.1"
+}
