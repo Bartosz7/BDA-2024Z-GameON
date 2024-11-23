@@ -89,9 +89,6 @@ def races(raceId):
         out_dict = "Invalid data provided."
 
     return out_dict
-# football events api
-@app.get("/events/{matchId}")
-def events(matchId: int, start_time: float = 0, end_time: float = float("inf")):
 
 
 # football events api
@@ -148,84 +145,73 @@ def events(matchId: int, start_time: float = 0, end_time: float = float("inf")):
         }
     except Exception as e:
         out_dict = {"error": f"Invalid data provided. Error: {str(e)}"}
-    except Exception as e:
-        out_dict = {"error": f"Invalid data provided. Error: {str(e)}"}
 
     return out_dict
 
-# football matches api
 
-# football matches api
-@app.get("/matches/{matchId}")
-def matches(matchId):
-    df = pd.read_csv("data/matches.csv")
-    df = df[(df["wyId"] == int(matchId))]
+@app.get("/matches")
+def matches(matchId: int = None, gameweek: int = None, competitionId: int = None):
+    # Load the matches data
+    df = pd.read_parquet("data/matches.parquet")
+    df = df.fillna('')
 
-    out_dict = {}
+    # Apply filters based on provided query parameters
+    if matchId is not None:
+        df = df[df["wyId"] == matchId]
+    elif gameweek is not None:
+        df = df[df["gameweek"] == gameweek]
+        if competitionId is not None:
+            df = df[df["competitionId"] == competitionId]
+
+    # Prepare the output
+    if df.empty:
+        return {"error": "No matches found with the given parameters."}
+
+    out_dict = {"matches": {}}
+
     try:
-        out_dict["match"] = {
-            f"{matchId}": {
-                "roundId": df["roundId"].values[0],
-                "gameweek": df["gameweek"].values[0],
-                "teamsData": df["teamsData"].values[0],
-                "seasonId": df["seasonId"].values[0],
-                "dateutc": df["dateutc"].values[0],
-                "venue": df["venue"].values[0],
-                "date": df["date"].values[0],
-                "referees": df["referees"].values[0],
-                "competitionId": df["competitionId"].values[0],
+        for _, match in df.iterrows():
+            match_id = match["wyId"]
+            out_dict["matches"][f"{match_id}"] = {
+                "roundId": match["roundId"],
+                "gameweek": match["gameweek"],
+                "teamsData": match["teamsData"],
+                "seasonId": match["seasonId"],
+                "dateutc": match["dateutc"],
+                "venue": match["venue"],
+                "date": match["date"],
+                "referees": match["referees"],
+                "competitionId": match["competitionId"],
                 "team1": {
-                    "scoreET": df["team1.scoreET"].values[0],
-                    "scoreET": df["team1.scoreET"].values[0],
-                    "coachId": df["team1.coachId"].values[0],
-                    "side": df["team1.side"].values[0],
-                    "teamId": df["team1.teamId"].values[0],
-                    "score": df["team1.score"].values[0],
-                    "scoreP": df["team1.scoreP"].values[0],
-                    "hasFormation": df["team1.hasFormation"].values[0],
-                    "formation": df["team1.formation"].values[0],
-                    "scoreHT": df["team1.scoreHT"].values[0],
-                    "formation.bench": df["team1.formation.bench"].values[0],
-                    "formation.lineup": df["team1.formation.lineup"].values[0],
-                    "formation.substitutions": df["team1.formation.substitutions"].values[0],
-                    "score": df["team1.score"].values[0],
-                    "scoreP": df["team1.scoreP"].values[0],
-                    "hasFormation": df["team1.hasFormation"].values[0],
-                    "formation": df["team1.formation"].values[0],
-                    "scoreHT": df["team1.scoreHT"].values[0],
-                    "formation.bench": df["team1.formation.bench"].values[0],
-                    "formation.lineup": df["team1.formation.lineup"].values[0],
-                    "formation.substitutions": df["team1.formation.substitutions"].values[0],
+                    "scoreET": match["team1.scoreET"],
+                    "coachId": match["team1.coachId"],
+                    "side": match["team1.side"],
+                    "teamId": match["team1.teamId"],
+                    "score": match["team1.score"],
+                    "scoreP": match["team1.scoreP"],
+                    "hasFormation": match["team1.hasFormation"],
+                    "formation": match["team1.formation"],
+                    "scoreHT": match["team1.scoreHT"],
+                    "formation.bench": match["team1.formation.bench"],
+                    "formation.lineup": match["team1.formation.lineup"],
+                    "formation.substitutions": match["team1.formation.substitutions"],
                 },
                 "team2": {
-                    "scoreET": df["team2.scoreET"].values[0],
-                    "scoreET": df["team2.scoreET"].values[0],
-                    "coachId": df["team2.coachId"].values[0],
-                    "side": df["team2.side"].values[0],
-                    "teamId": df["team2.teamId"].values[0],
-                    "score": df["team2.score"].values[0],
-                    "scoreP": df["team2.scoreP"].values[0],
-                    "hasFormation": df["team2.hasFormation"].values[0],
-                    "formation": df["team2.formation"].values[0],
-                    "scoreHT": df["team2.scoreHT"].values[0],
-                    "formation.bench": df["team2.formation.bench"].values[0],
-                    "formation.lineup": df["team2.formation.lineup"].values[0],
-                    "formation.substitutions": df["team2.formation.substitutions"].values[0],
-                },
-                "groupName": df["groupName"].values[0],
-                    "score": df["team2.score"].values[0],
-                    "scoreP": df["team2.scoreP"].values[0],
-                    "hasFormation": df["team2.hasFormation"].values[0],
-                    "formation": df["team2.formation"].values[0],
-                    "scoreHT": df["team2.scoreHT"].values[0],
-                    "formation.bench": df["team2.formation.bench"].values[0],
-                    "formation.lineup": df["team2.formation.lineup"].values[0],
-                    "formation.substitutions": df["team2.formation.substitutions"].values[0],
-                },
-                "groupName": df["groupName"].values[0],
+                    "scoreET": match["team2.scoreET"],
+                    "coachId": match["team2.coachId"],
+                    "side": match["team2.side"],
+                    "teamId": match["team2.teamId"],
+                    "score": match["team2.score"],
+                    "scoreP": match["team2.scoreP"],
+                    "hasFormation": match["team2.hasFormation"],
+                    "formation": match["team2.formation"],
+                    "scoreHT": match["team2.scoreHT"],
+                    "formation.bench": match["team2.formation.bench"],
+                    "formation.lineup": match["team2.formation.lineup"],
+                    "formation.substitutions": match["team2.formation.substitutions"],
+                }
             }
-        }
-    except:
-        out_dict = "Invalid data provided."
+    except Exception as e:
+        return {"error": f"An error occurred while processing the data: {str(e)}"}
 
     return out_dict
