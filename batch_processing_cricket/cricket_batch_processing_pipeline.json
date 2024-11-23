@@ -1,0 +1,120 @@
+{
+  "components": {
+    "comp-load-and-preprocess": {
+      "executorLabel": "exec-load-and-preprocess",
+      "inputDefinitions": {
+        "parameters": {
+          "match_ids": {
+            "parameterType": "LIST"
+          },
+          "write_disp": {
+            "defaultValue": "APPEND",
+            "isOptional": true,
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-load-and-preprocess": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "load_and_preprocess"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef load_and_preprocess(\n    match_ids: List[int],\n    write_disp: str = 'APPEND',\n):\n    from cricket_utils import (\n        load_data,\n        transform_cricket_data,\n        save_historic_to_big_query,\n    )\n\n    print(\"Loading data...\")\n    df = load_data(match_ids)\n\n    print(\"Transforming data...\")\n    df = transform_cricket_data(df)\n\n    print(\"Saving data to BigQuery...\")\n    save_historic_to_big_query(df, write_disp)\n\n"
+          ],
+          "image": "europe-west3-docker.pkg.dev/bda-gameon-demo/vertex/base_cricket_container:latest"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "Cricket batch processing pipeline",
+    "name": "batch-processing"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "load-and-preprocess": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-load-and-preprocess"
+          },
+          "inputs": {
+            "parameters": {
+              "match_ids": {
+                "componentInputParameter": "match_ids"
+              },
+              "write_disp": {
+                "componentInputParameter": "write_disp"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Load and Preprocess Data"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "match_ids": {
+          "defaultValue": [
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0,
+            9.0,
+            10.0,
+            11.0,
+            12.0,
+            13.0,
+            14.0,
+            15.0,
+            16.0,
+            17.0,
+            18.0,
+            19.0,
+            20.0,
+            21.0,
+            22.0,
+            23.0,
+            24.0,
+            25.0,
+            26.0,
+            27.0,
+            28.0,
+            29.0
+          ],
+          "isOptional": true,
+          "parameterType": "LIST"
+        },
+        "write_disp": {
+          "defaultValue": "APPEND",
+          "isOptional": true,
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.10.1"
+}
