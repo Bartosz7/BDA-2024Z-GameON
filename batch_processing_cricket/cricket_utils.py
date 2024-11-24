@@ -7,6 +7,30 @@ API_BASE_URL = "https://big-data-project-api-248863766350.europe-west3.run.app/c
 PROJECT_ID = "bda-gameon-demo"
 DATASET_ID = "cricket"
 TABLE_ID = "historic_data"
+SCHEMA = [
+    bigquery.SchemaField("inning", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("over", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("batter", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("bowler", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("non_striker", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("runs_batter", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("runs_extras", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("runs_total", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("cumulative_score", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("cumulative_wickets", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("winner", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("toss_decision", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("toss_winner", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("season", "FLOAT", mode="REQUIRED"),
+    bigquery.SchemaField("current_team", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("first_inning_total_score", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("first_inning_total_wickets", "INTEGER", mode="REQUIRED"),
+    bigquery.SchemaField("first_inning_run_rate", "FLOAT", mode="REQUIRED"),
+    bigquery.SchemaField("team_1", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("team_2", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("run_rate", "FLOAT", mode="REQUIRED"),
+    bigquery.SchemaField("required_run_rate", "FLOAT", mode="REQUIRED"),
+]
 
 
 def process_delivery(
@@ -220,6 +244,7 @@ def save_historic_to_big_query(
         dataset = bigquery.Dataset(dataset_ref)
         dataset.location = "EU"
         client.create_dataset(dataset, exists_ok=True)
+        print(f"Dataset {DATASET_ID} created.")
 
     assert write_disp in ["APPEND", "TRUNCATE"]
 
@@ -227,6 +252,13 @@ def save_historic_to_big_query(
         write_disp = bigquery.WriteDisposition.WRITE_APPEND
     elif write_disp == "TRUNCATE":
         write_disp = bigquery.WriteDisposition.WRITE_TRUNCATE
+
+    try:
+        client.get_table(table_ref)
+    except Exception as e:
+        table = bigquery.Table(table_ref, schema=SCHEMA)
+        client.create_table(table)
+        print(f"Table {TABLE_ID} created with NOT NULL schema.")
 
     job_config = bigquery.LoadJobConfig(
         write_disposition=write_disp,
