@@ -1,0 +1,125 @@
+{
+  "components": {
+    "comp-load-and-preprocess": {
+      "executorLabel": "exec-load-and-preprocess",
+      "inputDefinitions": {
+        "parameters": {
+          "competitionId": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "gamesweek": {
+            "parameterType": "NUMBER_INTEGER"
+          }
+        }
+      }
+    },
+    "comp-train-model": {
+      "executorLabel": "exec-train-model"
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-load-and-preprocess": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "load_and_preprocess"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef load_and_preprocess(\n    gamesweek: int,\n    competitionId: int,\n):\n    import requests\n    from vertex_utils import (\n        prepare_df_from_events_api,\n        prepare_df_from_matches_api,\n        fetch_events_data,\n        merge_events_and_matches,\n        enrich_with_tags_names,\n        save_historic_to_big_query,\n        prepare_aggregations,\n    )\n\n    API_BASE_URL = \"https://big-data-project-api-248863766350.europe-west3.run.app\"\n\n    # Fetch matches for the given gameweek and competitionId\n    api_match_url = f\"{API_BASE_URL}/matches?gameweek={gamesweek}&competitionId={competitionId}\"\n\n    print(f\"Fetching match info for competition: {competitionId} and gameweek: {gamesweek}...\")\n    response_matches = requests.get(api_match_url)\n\n    if response_matches.status_code != 200:\n        raise Exception(f\"API call failed with status code {response_matches.status_code}: {response_matches.text}\")\n\n    matches_data = response_matches.json()\n\n    if \"matches\" not in matches_data:\n        raise ValueError(\"Invalid matches data format received from API.\")\n\n    print(f\"Gathering match info for competition: {competitionId} and gamesweek: {gamesweek}...\")\n    matches_df = prepare_df_from_matches_api(matches_data)\n\n    print(f\"Fetching events data for competition: {competitionId} and gameweek: {gamesweek}...\")\n    events_data = fetch_events_data(matches_df, API_BASE_URL)\n\n    # Convert events data to a DataFrame\n    print(f\"Preparing events DataFrame for competition: {competitionId} and gameweek: {gamesweek}...\")\n    events_df = prepare_df_from_events_api(events_data)\n\n    print(\"Merging events and match data...\")\n    df = merge_events_and_matches(events_df, matches_df)\n\n    print(\"Enriching with tags names...\")\n    df = enrich_with_tags_names(df)\n\n    print(\"Preparing aggregations...\")\n    aggregations = prepare_aggregations(df)\n\n    print(\"Saving aggregations to BigQuery...\")\n    save_historic_to_big_query(aggregations)\n\n"
+          ],
+          "image": "europe-west3-docker.pkg.dev/bda-gameon-demo/vertex/base_football_container:1.0.7"
+        }
+      },
+      "exec-train-model": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "train_model"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef train_model():\n    from google.cloud import bigquery\n\n    query = \"\"\"    \n        CREATE OR REPLACE MODEL football.lightgbm_model\n        OPTIONS(model_type='BOOSTED_TREE_CLASSIFIER',\n                input_label_cols=['label'],\n                budget_hours=1)\n        AS\n        SELECT\n            *\n        FROM\n            `bda-gameon-demo.football.historic_aggregations`\n    \"\"\"\n\n    client = bigquery.Client(project=\"bda-gameon-demo\")\n    client.query(query).result()\n\n"
+          ],
+          "image": "europe-west3-docker.pkg.dev/bda-gameon-demo/vertex/base_football_container:1.0.7"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "Pipeline responsible for batch processing and model training",
+    "name": "batch-processing"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "load-and-preprocess": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-load-and-preprocess"
+          },
+          "inputs": {
+            "parameters": {
+              "competitionId": {
+                "componentInputParameter": "competitionId"
+              },
+              "gamesweek": {
+                "componentInputParameter": "gamesweek"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Load and Preprocess"
+          }
+        },
+        "train-model": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-train-model"
+          },
+          "dependentTasks": [
+            "load-and-preprocess"
+          ],
+          "taskInfo": {
+            "name": "Train Model"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "competitionId": {
+          "defaultValue": 364.0,
+          "isOptional": true,
+          "parameterType": "NUMBER_INTEGER"
+        },
+        "gamesweek": {
+          "defaultValue": 1.0,
+          "isOptional": true,
+          "parameterType": "NUMBER_INTEGER"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.10.1"
+}

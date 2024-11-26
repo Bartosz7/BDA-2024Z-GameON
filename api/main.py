@@ -99,15 +99,10 @@ def events(matchId: int, start_time: float = 0, end_time: float = float("inf")):
 
     df = df[
         (df["matchId"] == matchId) &
-        (df["eventSec"] >= start_time) &
-        (df["eventSec"] <= end_time)
-    ]
-
-
-    df = df[
-        (df["matchId"] == matchId) &
-        (df["eventSec"] >= start_time) &
-        (df["eventSec"] <= end_time)
+        (
+            ((df["matchPeriod"] == "2H") & ((df["eventSec"] + 3600) >= start_time) & ((df["eventSec"] + 3600) <= end_time)) |
+            ((df["matchPeriod"] != "2H") & (df["eventSec"] >= start_time) & (df["eventSec"] <= end_time))
+        )
     ]
 
     out_dict = {}
@@ -149,13 +144,13 @@ def events(matchId: int, start_time: float = 0, end_time: float = float("inf")):
     return out_dict
 
 
+
+# football matches api
 @app.get("/matches")
 def matches(matchId: int = None, gameweek: int = None, competitionId: int = None):
-    # Load the matches data
     df = pd.read_parquet("data/matches.parquet")
     df = df.fillna('')
 
-    # Apply filters based on provided query parameters
     if matchId is not None:
         df = df[df["wyId"] == matchId]
     elif gameweek is not None:
@@ -163,7 +158,6 @@ def matches(matchId: int = None, gameweek: int = None, competitionId: int = None
         if competitionId is not None:
             df = df[df["competitionId"] == competitionId]
 
-    # Prepare the output
     if df.empty:
         return {"error": "No matches found with the given parameters."}
 
@@ -182,6 +176,11 @@ def matches(matchId: int = None, gameweek: int = None, competitionId: int = None
                 "date": match["date"],
                 "referees": match["referees"],
                 "competitionId": match["competitionId"],
+                "status": match["status"],
+                "winner": match["winner"],
+                "duration": match["duration"],
+                "label": match["label"],
+
                 "team1": {
                     "scoreET": match["team1.scoreET"],
                     "coachId": match["team1.coachId"],

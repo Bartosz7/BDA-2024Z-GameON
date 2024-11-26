@@ -19,30 +19,39 @@ def prepare_df_from_events_api(data):
                 'match_period': event_data.get('matchPeriod', ''),
                 'event_sec': event_data.get('eventSec', 0),
                 'sub_event_id': event_data.get('subEventId', ''),
-                'origin_x': event_data.get('positions', {}).get('origin', {}).get('x', None),
-                'origin_y': event_data.get('positions', {}).get('origin', {}).get('y', None),
-                'destination_x': event_data.get('positions', {}).get('destination', {}).get('x', None),
-                'destination_y': event_data.get('positions', {}).get('destination', {}).get('y', None),
+                'pos_orig_x': event_data.get('positions', {}).get('origin', {}).get('x', None),
+                'pos_orig_y': event_data.get('positions', {}).get('origin', {}).get('y', None),
+                'pos_dest_x': event_data.get('positions', {}).get('destination', {}).get('x', None),
+                'pos_dest_y': event_data.get('positions', {}).get('destination', {}).get('y', None),
                 'tags_list': event_data.get('tagsList', []),
             })
 
     return pd.DataFrame(rows)
 
-def fetch_events_data(matches_data, api_base_url):
+def fetch_events_data(matches_df, api_base_url):
     events_data = {"matches": {}}
-    for match_id in matches_data["matches"].keys():
+    
+    match_ids = matches_df['match_id'].unique()
+    
+    for match_id in match_ids:
         api_events_url = f"{api_base_url}/events/{match_id}"
 
+        print(f"Fetching data from URL: {api_events_url}")
+        
         response_events = requests.get(api_events_url)
-        events_response = response_events.json()
 
+        if response_events.status_code != 200:
+            raise ValueError(f"Invalid response status code: {response_events.status_code}")
+        
+        events_response = response_events.json()
+        
         if "matches" not in events_response or str(match_id) not in events_response["matches"]:
             raise ValueError(f"Invalid events data format for match ID {match_id}.")
-
+        
         events_data["matches"][str(match_id)] = {
             "events": events_response["matches"][str(match_id)]["events"]
         }
-
+    
     return events_data
 
 
@@ -61,6 +70,10 @@ def prepare_df_from_matches_api(data):
             'date': match_info.get('date', ''),
             'referees': match_info.get('referees', ''),
             'competition_id': match_info.get('competitionId', ''),
+            'duration': match_info.get('duration', ''),
+            'label': match_info.get('label', ''),
+            'status': match_info.get('status', ''),
+            'winner': match_info.get('winner', ''),
 
             # Team 1 details
             'team1_score_et': match_info['team1'].get('scoreET', ''),
@@ -96,28 +109,30 @@ def prepare_df_from_matches_api(data):
 
 
 def adjust_event_sec(group):
-    max_first_half_time = group[group['matchPeriod'] == '1H']['eventSec'].max()
-    group.loc[group['matchPeriod'] == '2H', 'eventSec'] += max_first_half_time
+    max_first_half_time = group[group['match_period'] == '1H']['event_sec'].max()
+    group.loc[group['match_period'] == '2H', 'event_sec'] += max_first_half_time
     return group
 
 
 def merge_events_and_matches(events_df, matches_df):
-    matches_df = matches_df[['match_id', 'team1_id', 'team2_id', 'team1_side', 'team2_side']]
-    matches_df['winner'] = matches_df.apply(lambda x: x['team1_side'] if x['team1_id'] == x['winner'] else x['team2_side'] if x['team2_id'] == x['winner'] else 'draw', axis=1)
+    matches_df = matches_df[['match_id', 'team1_id', 'team2_id', 'team1_side', 'team2_side', 'winner']]
+    matches_df.loc[:, 'winner'] = matches_df.apply(
+        lambda x: x['team1_side'] if x['team1_id'] == x['winner'] else x['team2_side'] if x['team2_id'] == x['winner'] else 'draw',
+        axis=1
+    )
     df = pd.merge(events_df, matches_df, left_on='match_id', right_on='match_id')
     df['side' ] = df.apply(lambda x: x['team1_side'] if x['team1_id'] == x['team_id'] else x['team2_side'], axis=1)
+    df = df.groupby('match_id', group_keys=False).apply(adjust_event_sec)
     columns_used = [
         "event_id",
-        "matchId",
-        "eventSec",
+        "match_id",
+        "event_sec",
         "side",
-        "eventName",
-        "tagsLabels",
+        "event_name",
+        "tags_list",
         "pos_orig_x"
     ]
-    df = df[columns_used]
-    df = df.groupby('match_id', group_keys=False).apply(adjust_event_sec)
-    return df
+    return df[columns_used]
 
 def safe_literal_eval(val):
     try:
@@ -142,9 +157,9 @@ def enrich_with_tags_names(df):
     df_tags = query_job.to_dataframe()
     tag_to_label = df_tags.set_index("Tag")["Label"].to_dict()
 
-    df["tagsList"] = df["tagsList"].apply(safe_literal_eval)
-    df["tagsLabels"] = df["tagsList"].apply(lambda tags: [tag_to_label.get(tag, "Unknown") for tag in tags])
-    df.drop(columns=["tagsList"], inplace=True)
+    df["tags_list"] = df["tags_list"].apply(safe_literal_eval)
+    df["tags_labels"] = df["tags_list"].apply(lambda tags: [tag_to_label.get(tag, "Unknown") for tag in tags])
+    df.drop(columns=["tags_list"], inplace=True)
 
     return df
 
@@ -153,83 +168,81 @@ def prepare_aggregations(events):
     aggregations = []
 
     for _, row in events.iterrows():
-        match_id = row["matchId"]
-        event_sec = row["eventSec"]
+        match_id = row["match_id"]
+        event_sec = row["event_sec"]
 
-        # Filter events up to the current event_sec
-        match_events = events[(events["matchId"] == match_id) & (events["eventSec"] <= event_sec)]
+        match_events = events[(events["match_id"] == match_id) & (events["event_sec"] <= event_sec)]
 
         # Cumulative features
         cumulative_stats = {
-            "matchId": match_id,
-            "eventSec": event_sec,
-            "home_shots": match_events[(match_events["side"] == "home") & (match_events["eventName"] == "Shot")].shape[0],
-            "away_shots": match_events[(match_events["side"] == "away") & (match_events["eventName"] == "Shot")].shape[0],
+            "match_id": match_id,
+            "event_sec": event_sec,
+            "home_shots": match_events[(match_events["side"] == "home") & (match_events["event_name"] == "Shot")].shape[0],
+            "away_shots": match_events[(match_events["side"] == "away") & (match_events["event_name"] == "Shot")].shape[0],
             "home_accurate_shots": match_events[
                 (match_events["side"] == "home") &
-                (match_events["eventName"] == "Shot") &
-                (match_events["tagsLabels"].apply(lambda x: "accurate" in x))
+                (match_events["event_name"] == "Shot") &
+                (match_events["tags_labels"].apply(lambda x: "accurate" in x))
             ].shape[0],
             "away_accurate_shots": match_events[
                 (match_events["side"] == "away") &
-                (match_events["eventName"] == "Shot") &
-                (match_events["tagsLabels"].apply(lambda x: "accurate" in x))
+                (match_events["event_name"] == "Shot") &
+                (match_events["tags_labels"].apply(lambda x: "accurate" in x))
             ].shape[0],
-            "home_passes": match_events[(match_events["side"] == "home") & (match_events["eventName"] == "Pass")].shape[0],
-            "away_passes": match_events[(match_events["side"] == "away") & (match_events["eventName"] == "Pass")].shape[0],
+            "home_passes": match_events[(match_events["side"] == "home") & (match_events["event_name"] == "Pass")].shape[0],
+            "away_passes": match_events[(match_events["side"] == "away") & (match_events["event_name"] == "Pass")].shape[0],
             "home_goals": match_events[
                 (match_events["side"] == "home") &
-                (match_events["tagsLabels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
+                (match_events["tags_labels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
             ].shape[0],
             "away_goals": match_events[
                 (match_events["side"] == "away") &
-                (match_events["tagsLabels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
+                (match_events["tags_labels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
             ].shape[0],
             "home_avg_pos_x": match_events[match_events["side"] == "home"]["pos_orig_x"].mean(),
             "away_avg_pos_x": match_events[match_events["side"] == "away"]["pos_orig_x"].mean(),
-            "home_fouls": match_events[(match_events["side"] == "home") & (match_events["eventName"] == "Foul")].shape[0],
-            "away_fouls": match_events[(match_events["side"] == "away") & (match_events["eventName"] == "Foul")].shape[0],
+            "home_fouls": match_events[(match_events["side"] == "home") & (match_events["event_name"] == "Foul")].shape[0],
+            "away_fouls": match_events[(match_events["side"] == "away") & (match_events["event_name"] == "Foul")].shape[0],
             "home_yellow_cards": match_events[
-                (match_events["side"] == "home") & (match_events["eventName"] == "Card") &
-                (match_events["tagsLabels"].apply(lambda x: "yellow_card" in x))
+                (match_events["side"] == "home") & (match_events["event_name"] == "Card") &
+                (match_events["tags_labels"].apply(lambda x: "yellow_card" in x))
             ].shape[0],
             "away_yellow_cards": match_events[
-                (match_events["side"] == "away") & (match_events["eventName"] == "Card") &
-                (match_events["tagsLabels"].apply(lambda x: "yellow_card" in x))
+                (match_events["side"] == "away") & (match_events["event_name"] == "Card") &
+                (match_events["tags_labels"].apply(lambda x: "yellow_card" in x))
             ].shape[0],
             "home_red_cards": match_events[
-                (match_events["side"] == "home") & (match_events["eventName"] == "Card") &
-                (match_events["tagsLabels"].apply(lambda x: "red_card" in x))
+                (match_events["side"] == "home") & (match_events["event_name"] == "Card") &
+                (match_events["tags_labels"].apply(lambda x: "red_card" in x))
             ].shape[0],
             "away_red_cards": match_events[
-                (match_events["side"] == "away") & (match_events["eventName"] == "Card") &
-                (match_events["tagsLabels"].apply(lambda x: "red_card" in x))
+                (match_events["side"] == "away") & (match_events["event_name"] == "Card") &
+                (match_events["tags_labels"].apply(lambda x: "red_card" in x))
             ].shape[0],
         }
 
         # Rolling window features (last 5 minutes)
         rolling_window_start = max(0, event_sec - 300)
-        rolling_events = match_events[match_events["eventSec"] >= rolling_window_start]
+        rolling_events = match_events[match_events["event_sec"] >= rolling_window_start]
         rolling_stats = {
-            "home_shots_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["eventName"] == "Shot")].shape[0],
-            "away_shots_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["eventName"] == "Shot")].shape[0],
-            "home_passes_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["eventName"] == "Pass")].shape[0],
-            "away_passes_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["eventName"] == "Pass")].shape[0],
+            "home_shots_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["event_name"] == "Shot")].shape[0],
+            "away_shots_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["event_name"] == "Shot")].shape[0],
+            "home_passes_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["event_name"] == "Pass")].shape[0],
+            "away_passes_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["event_name"] == "Pass")].shape[0],
             "home_goals_last_5min": rolling_events[
                 (rolling_events["side"] == "home") &
-                (rolling_events["tagsLabels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
+                (rolling_events["tags_labels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
             ].shape[0],
             "away_goals_last_5min": rolling_events[
                 (rolling_events["side"] == "away") &
-                (rolling_events["tagsLabels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
+                (rolling_events["tags_labels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
             ].shape[0],
-            "home_fouls_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["eventName"] == "Foul")].shape[0],
-            "away_fouls_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["eventName"] == "Foul")].shape[0],
+            "home_fouls_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["event_name"] == "Foul")].shape[0],
+            "away_fouls_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["event_name"] == "Foul")].shape[0],
             "home_avg_pos_x_last_5min": rolling_events[rolling_events["side"] == "home"]["pos_orig_x"].mean(),
             "away_avg_pos_x_last_5min": rolling_events[rolling_events["side"] == "away"]["pos_orig_x"].mean(),
         }
 
-        # Combine features
         cumulative_stats.update(rolling_stats)
         aggregations.append(cumulative_stats)
 
