@@ -1,9 +1,10 @@
 requests
 pandas
-google.cloud.bigquery
-google.cloud.aiplatform
-google.cloud.storage
+google-cloud-bigquery
+google-cloud-aiplatform
+google-cloud-storage
 db-dtypes
 scikit-learn
 joblib
 lightgbm
+google-cloud-bigquery-storage

@@ -116,8 +116,13 @@ def adjust_event_sec(group):
 
 def merge_events_and_matches(events_df, matches_df):
     matches_df = matches_df[['match_id', 'team1_id', 'team2_id', 'team1_side', 'team2_side', 'winner']]
-    matches_df.loc[:, 'winner'] = matches_df.apply(
-        lambda x: x['team1_side'] if x['team1_id'] == x['winner'] else x['team2_side'] if x['team2_id'] == x['winner'] else 'draw',
+    matches_df['team1_id'] = matches_df['team1_id'].astype(int)
+    matches_df['team2_id'] = matches_df['team2_id'].astype(int)
+    matches_df['winner'] = matches_df['winner'].astype(int)
+    matches_df['result'] = matches_df.apply(
+        lambda x: x['team1_side'] if x['team1_id'] == x['winner']
+        else x['team2_side'] if x['team2_id'] == x['winner']
+        else 'draw',
         axis=1
     )
     df = pd.merge(events_df, matches_df, left_on='match_id', right_on='match_id')
@@ -130,7 +135,8 @@ def merge_events_and_matches(events_df, matches_df):
         "side",
         "event_name",
         "tags_list",
-        "pos_orig_x"
+        "pos_orig_x",
+        "result",
     ]
     return df[columns_used]
 
@@ -170,6 +176,7 @@ def prepare_aggregations(events):
     for _, row in events.iterrows():
         match_id = row["match_id"]
         event_sec = row["event_sec"]
+        result = row["result"]
 
         match_events = events[(events["match_id"] == match_id) & (events["event_sec"] <= event_sec)]
 
@@ -177,6 +184,7 @@ def prepare_aggregations(events):
         cumulative_stats = {
             "match_id": match_id,
             "event_sec": event_sec,
+            "result": result,
             "home_shots": match_events[(match_events["side"] == "home") & (match_events["event_name"] == "Shot")].shape[0],
             "away_shots": match_events[(match_events["side"] == "away") & (match_events["event_name"] == "Shot")].shape[0],
             "home_accurate_shots": match_events[
