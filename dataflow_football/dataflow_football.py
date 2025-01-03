@@ -9,6 +9,7 @@ def run():
     import json
     import logging
     import time
+    import ast
 
     PROJECT_ID = 'bda-gameon-demo'
     DATASET_ID = 'football'
@@ -64,6 +65,19 @@ def run():
         except Exception as e:
             logging.error(f"Failed to parse JSON: {e} | Data: {json_data}")
             return None
+    
+
+    def ensure_tags_list(event):
+        tags_list = event.get("tagsList", "")
+        try:
+            if isinstance(tags_list, str) and tags_list.strip():
+                event["tagsList"] = ast.literal_eval(tags_list)
+            else:
+                event["tagsList"] = []
+        except Exception as e:
+            logging.error(f"Failed to parse tagsList: {e} | Event: {event}")
+            event["tagsList"] = []
+        return event
 
 
 
@@ -123,15 +137,16 @@ def run():
                 current_time = time.time()
                 side = event.get("side", "unknown")
                 event_name = event["eventName"].strip().lower()
+                tags_list = event["tagsList"]
 
                 if event_name == "shot":
                     if side == "home":
                         cumulative_stats["home_shots"] += 1
-                        if 1801 in event.get("tagsList", []):
+                        if 1801 in tags_list:
                             cumulative_stats["home_accurate_shots"] += 1
                     elif side == "away":
                         cumulative_stats["away_shots"] += 1
-                        if 1801 in event.get("tagsList", []):
+                        if 1801 in tags_list:
                             cumulative_stats["away_accurate_shots"] += 1
                 elif event_name == "pass":
                     if side == "home":
@@ -143,10 +158,10 @@ def run():
                         cumulative_stats["home_fouls"] += 1
                     elif side == "away":
                         cumulative_stats["away_fouls"] += 1
-                elif "goal" in event.get("tagsList", []):
-                    if side == "home" and 1801 in event.get("tagsList", []):
+                elif "goal" in tags_list:
+                    if side == "home" and 1801 in tags_list:
                         cumulative_stats["home_goals"] += 1
-                    elif side == "away" and 1801 in event.get("tagsList", []):
+                    elif side == "away" and 1801 in tags_list:
                         cumulative_stats["away_goals"] += 1
 
                 rolling_window.append((current_time, event))
@@ -178,6 +193,7 @@ def run():
             factor = -1 if remove else 1
             side = event.get("side", "unknown")
             event_name = event["eventName"].strip().lower()
+            tags_list = event["tagsList"]
 
             if event_name == "shot":
                 if side == "home":
@@ -194,7 +210,7 @@ def run():
                     rolling_stats["home_fouls_last_5min"] += factor
                 elif side == "away":
                     rolling_stats["away_fouls_last_5min"] += factor
-            elif "goal" in event.get("tagsList", []):
+            elif "goal" in tags_list:
                 if side == "home":
                     rolling_stats["home_goals_last_5min"] += factor
                 elif side == "away":
@@ -232,6 +248,7 @@ def run():
                 }
             )
             | "Log Adjusted Events" >> beam.Map(lambda event: logging.info(f"Adjusted Event: {event}") or event)
+            | "Ensure tagsList Is List" >> beam.Map(ensure_tags_list)
             | "Enrich with Match Info" >> beam.ParDo(EnrichWithMatchInfoFn(), matches_side_input)
             | "Log Enriched Events" >> beam.Map(lambda event: logging.info(f"Enriched Event: {event}") or event)
             | "Key by matchId" >> beam.Map(lambda event: (event['matchId'], event))
