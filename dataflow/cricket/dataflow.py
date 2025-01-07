@@ -126,6 +126,9 @@ def process_over(data):
     except json.JSONDecodeError:
         return []
     
+    if parsed_data == "Invalid data provided.":
+        return []
+    
     match_id = parsed_data["match_id"]
     current_team = parsed_data["team"]
     teams = list(parsed_data["players"].keys())
