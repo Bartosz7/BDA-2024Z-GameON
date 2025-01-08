@@ -170,8 +170,26 @@ def enrich_with_tags_names(df):
     return df
 
 
+def calculate_possession_time(events):
+    """
+    Calculate possession time for each team based on event timings.
+    """
+    events = events.sort_values(by=["match_id", "event_sec"]).copy()
+    events["time_diff"] = events.groupby("match_id")["event_sec"].diff().fillna(0)
+    
+    events["home_possession_time"] = events.apply(
+        lambda x: x["time_diff"] if x["side"] == "home" else 0, axis=1
+    )
+    events["away_possession_time"] = events.apply(
+        lambda x: x["time_diff"] if x["side"] == "away" else 0, axis=1
+    )
+    return events
+
+
 def prepare_aggregations(events):
     aggregations = []
+
+    events = calculate_possession_time(events)
 
     for _, row in events.iterrows():
         match_id = row["match_id"]
@@ -207,51 +225,29 @@ def prepare_aggregations(events):
                 (match_events["side"] == "away") &
                 (match_events["tags_labels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
             ].shape[0],
-            "home_avg_pos_x": match_events[match_events["side"] == "home"]["pos_orig_x"].mean(),
-            "away_avg_pos_x": match_events[match_events["side"] == "away"]["pos_orig_x"].mean(),
             "home_fouls": match_events[(match_events["side"] == "home") & (match_events["event_name"] == "Foul")].shape[0],
             "away_fouls": match_events[(match_events["side"] == "away") & (match_events["event_name"] == "Foul")].shape[0],
-            "home_yellow_cards": match_events[
-                (match_events["side"] == "home") & (match_events["event_name"] == "Card") &
-                (match_events["tags_labels"].apply(lambda x: "yellow_card" in x))
-            ].shape[0],
-            "away_yellow_cards": match_events[
-                (match_events["side"] == "away") & (match_events["event_name"] == "Card") &
-                (match_events["tags_labels"].apply(lambda x: "yellow_card" in x))
-            ].shape[0],
-            "home_red_cards": match_events[
-                (match_events["side"] == "home") & (match_events["event_name"] == "Card") &
-                (match_events["tags_labels"].apply(lambda x: "red_card" in x))
-            ].shape[0],
-            "away_red_cards": match_events[
-                (match_events["side"] == "away") & (match_events["event_name"] == "Card") &
-                (match_events["tags_labels"].apply(lambda x: "red_card" in x))
-            ].shape[0],
+            "home_duels_won": match_events[(match_events["side"] == "home") &
+                                            (match_events["event_name"] == "Duel") &
+                                            (match_events["tags_labels"].apply(lambda x: "won" in x))].shape[0],
+            "away_duels_won": match_events[(match_events["side"] == "away") &
+                                            (match_events["event_name"] == "Duel") &
+                                            (match_events["tags_labels"].apply(lambda x: "won" in x))].shape[0],
+            "home_possession_time": match_events["home_possession_time"].sum(),
+            "away_possession_time": match_events["away_possession_time"].sum(),
         }
 
-        # Rolling window features (last 5 minutes)
-        rolling_window_start = max(0, event_sec - 300)
-        rolling_events = match_events[match_events["event_sec"] >= rolling_window_start]
-        rolling_stats = {
-            "home_shots_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["event_name"] == "Shot")].shape[0],
-            "away_shots_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["event_name"] == "Shot")].shape[0],
-            "home_passes_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["event_name"] == "Pass")].shape[0],
-            "away_passes_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["event_name"] == "Pass")].shape[0],
-            "home_goals_last_5min": rolling_events[
-                (rolling_events["side"] == "home") &
-                (rolling_events["tags_labels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
-            ].shape[0],
-            "away_goals_last_5min": rolling_events[
-                (rolling_events["side"] == "away") &
-                (rolling_events["tags_labels"].apply(lambda x: ("Goal" in x) & ("accurate" in x)))
-            ].shape[0],
-            "home_fouls_last_5min": rolling_events[(rolling_events["side"] == "home") & (rolling_events["event_name"] == "Foul")].shape[0],
-            "away_fouls_last_5min": rolling_events[(rolling_events["side"] == "away") & (rolling_events["event_name"] == "Foul")].shape[0],
-            "home_avg_pos_x_last_5min": rolling_events[rolling_events["side"] == "home"]["pos_orig_x"].mean(),
-            "away_avg_pos_x_last_5min": rolling_events[rolling_events["side"] == "away"]["pos_orig_x"].mean(),
+        diff_stats = {
+            "shots_diff": cumulative_stats["home_shots"] - cumulative_stats["away_shots"],
+            "accurate_shots_diff": cumulative_stats["home_accurate_shots"] - cumulative_stats["away_accurate_shots"],
+            "passes_diff": cumulative_stats["home_passes"] - cumulative_stats["away_passes"],
+            "goals_diff": cumulative_stats["home_goals"] - cumulative_stats["away_goals"],
+            "fouls_diff": cumulative_stats["home_fouls"] - cumulative_stats["away_fouls"],
+            "duels_won_diff": cumulative_stats["home_duels_won"] - cumulative_stats["away_duels_won"],
+            "possession_time_diff": cumulative_stats["home_possession_time"] - cumulative_stats["away_possession_time"],
         }
 
-        cumulative_stats.update(rolling_stats)
+        cumulative_stats.update(diff_stats)
         aggregations.append(cumulative_stats)
 
     return pd.DataFrame(aggregations)
