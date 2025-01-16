@@ -18,7 +18,7 @@ def cricket_over(cricketId, inning, over):
     return "Invalid data provided."
 
 
-@app.get("/laps/{raceId}/{lap}")
+@app.get("/laps/positions/{raceId}/{lap}")
 def laps(raceId, lap):
     df = pd.read_csv("data/lap_times.csv")
     df = df[(df["raceId"] == int(raceId)) & (df["lap"] == int(lap))]
@@ -28,6 +28,31 @@ def laps(raceId, lap):
         for _, driver in df.iterrows():
             given_lap[driver.driverId] = {
                 "position": driver.position,
+            }
+
+        out_dict["races"] = {
+            f"{raceId}": {
+                "laps": {
+                    f"{lap}": {
+                        "drivers": given_lap
+                    }
+                }
+            }
+        }
+    except:
+        out_dict = "Invalid data provided."
+
+    return out_dict
+
+@app.get("/laps/times/{raceId}/{lap}")
+def laps(raceId, lap):
+    df = pd.read_csv("data/lap_times.csv")
+    df = df[(df["raceId"] == int(raceId)) & (df["lap"] == int(lap))]
+    out_dict = {}
+    try:
+        given_lap = {}
+        for _, driver in df.iterrows():
+            given_lap[driver.driverId] = {
                 "milliseconds": driver.milliseconds
             }
 

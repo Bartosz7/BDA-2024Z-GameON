@@ -5,10 +5,9 @@ def run():
     from apache_beam.coders import PickleCoder
     from apache_beam.io.gcp.bigquery import ReadFromBigQuery, WriteToBigQuery
 
-    from collections import deque
     import json
     import logging
-    import time
+    import uuid
     import ast
 
     PROJECT_ID = 'bda-gameon-demo'
@@ -34,6 +33,7 @@ def run():
 
     schema = {
         "fields": [
+            {"name": "event_id", "type": "STRING"},
             {"name": "matchId", "type": "STRING"},
             {"name": "eventSec", "type": "FLOAT"},
             {"name": "home_shots", "type": "INTEGER"},
@@ -60,10 +60,9 @@ def run():
         ]
     }
 
-
-    # Schema for the predictions table
     prediction_schema = {
     "fields": [
+        {"name": "event_id", "type": "STRING"},
         {"name": "match_id", "type": "STRING"},
         {"name": "event_sec", "type": "FLOAT"},
         {"name": "predicted_result", "type": "STRING"},
@@ -83,6 +82,16 @@ def run():
         except Exception as e:
             logging.error(f"Failed to parse JSON: {e} | Data: {json_data}")
             return None
+        
+
+    def adjust_event_sec_for_2h(event):
+        try:
+            event["eventSec"] = event["eventSec"] + 3600 if event.get("matchPeriod") == "2H" else event["eventSec"]
+            return event
+        except Exception as e:
+            logging.error(f"Failed to adjust eventSec: {e} | Event: {event}")
+            return event
+
     
 
     def ensure_tags_list(event):
@@ -97,6 +106,11 @@ def run():
             event["tagsList"] = []
         return event
 
+
+    def generate_event_id(event):
+        unique_id = str(uuid.uuid4())
+        event["event_id"] = f"{event['matchId']}_{int(event['eventSec'])}_{unique_id}"
+        return event
 
 
     class EnrichWithMatchInfoFn(beam.DoFn):
@@ -126,11 +140,12 @@ def run():
                 logging.info(f"Processing matchId: {match_id} with event: {event}")
 
                 match_id = event.get('matchId')
+                event_id = event.get('event_id')
+
                 if not match_id:
                     logging.error("Missing matchId in event.")
                     return
 
-                # Initialize or retrieve match stats
                 stats = match_stats_state.read() or {
                     "cumulative": {
                         "home_goals": 0, "away_goals": 0,
@@ -169,7 +184,6 @@ def run():
                     elif stats["last_event_side"] == "away":
                         cumulative_stats["away_possession_time"] += max(0, time_diff)
 
-                # Calculate possession time
                 if stats["last_event_time"] is not None:
                     time_diff = event_sec - stats["last_event_time"]
                     if stats["last_event_side"] == "home":
@@ -177,7 +191,6 @@ def run():
                     elif stats["last_event_side"] == "away":
                         cumulative_stats["away_possession_time"] += max(0, time_diff)
 
-                # Update stats based on event type
                 if event_name == "shot":
                     if side == "home":
                         cumulative_stats["home_shots"] += 1
@@ -208,7 +221,6 @@ def run():
                     elif side == "away":
                         cumulative_stats["away_goals"] += 1
 
-                # Calculate stats diff
                 diff_stats["goals_diff"] = cumulative_stats["home_goals"] - cumulative_stats["away_goals"]
                 diff_stats["passes_diff"] = cumulative_stats["home_passes"] - cumulative_stats["away_passes"]
                 diff_stats["fouls_diff"] = cumulative_stats["home_fouls"] - cumulative_stats["away_fouls"]
@@ -221,8 +233,8 @@ def run():
                 stats["last_event_side"] = side
                 match_stats_state.write(stats)
 
-                # Emit output
                 output = {
+                    "event_id": event_id,
                     "matchId": match_id,
                     "eventSec": event["eventSec"],
                     **cumulative_stats,
@@ -249,10 +261,8 @@ def run():
             Query BigQuery ML model for predictions and extract probabilities.
             """
             try:
-                # Convert the event to JSON
                 event_json = json.dumps(element)
 
-                # Construct the ML.PREDICT query using WITH clause
                 query = f"""
                     WITH input_data AS (
                         SELECT
@@ -289,16 +299,13 @@ def run():
                     FROM ML.PREDICT(MODEL `{self.model_name}`, TABLE input_data)
                     """
 
-
-                # Execute the query
                 query_job = self.client.query(query)
 
-                # Process the result and extract probabilities
                 for row in query_job.result():
                     probabilities = {p["label"]: p["prob"] for p in row["probabilities"]}
 
-                    # Attach probabilities to the element
                     yield {
+                        "event_id": element["event_id"],
                         "match_id": element["matchId"],
                         "event_sec": element["eventSec"],
                         "predicted_result": row["predicted_result"],
@@ -309,7 +316,6 @@ def run():
             except Exception as e:
                 logging.error(f"Prediction error: {e} | Event: {element}")
                 raise
-
 
 
     with beam.Pipeline(options=options) as pipeline:
@@ -332,14 +338,10 @@ def run():
             | "Read from Pub/Sub" >> beam.io.ReadFromPubSub(topic=TOPIC_ID)
             | "Parse JSON" >> beam.Map(parse_event_data)
             | "Filter Non-Null Events" >> beam.Filter(lambda event: event is not None)
-            | "Adjust EventSec for 2H" >> beam.Map(
-                lambda event: {
-                    **event,
-                    'eventSec': event['eventSec'] + 3600 if event.get('matchPeriod') == '2H' else event['eventSec']
-                }
-            )
+            | "Adjust EventSec for 2H" >> beam.Map(adjust_event_sec_for_2h)
             | "Ensure tagsList Is List" >> beam.Map(ensure_tags_list)
             | "Enrich with Match Info" >> beam.ParDo(EnrichWithMatchInfoFn(), matches_side_input)
+            | "Generate Event ID" >> beam.Map(generate_event_id)
             | "Key by matchId" >> beam.Map(lambda event: (event['matchId'], event))
             | "Calculate Match Stats" >> beam.ParDo(MatchStatsFn())
             | "Log Match Stats Output" >> beam.Map(lambda event: logging.info(f"Match Stats Output: {event}") or event)
