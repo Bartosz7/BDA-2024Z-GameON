@@ -27,7 +27,7 @@ def run():
     gcp_options = options.view_as(GoogleCloudOptions)
     gcp_options.project = PROJECT_ID
     gcp_options.region = 'europe-central2'
-    gcp_options.job_name = 'football-dataflow-enrichment-pipeline-51'
+    gcp_options.job_name = 'football-dataflow-enrichment-pipeline-55'
     gcp_options.staging_location = 'gs://gameon-bucket-eu/staging'
     gcp_options.temp_location = 'gs://gameon-bucket-eu/temp'
 
@@ -92,7 +92,6 @@ def run():
             logging.error(f"Failed to adjust eventSec: {e} | Event: {event}")
             return event
 
-    
 
     def ensure_tags_list(event):
         tags_list = event.get("tagsList", "")
@@ -175,6 +174,7 @@ def run():
                 side = event.get("side", "unknown")
                 event_name = event["eventName"].strip().lower()
                 tags_list = event.get("tagsList", [])
+                tags_list = list(map(str, tags_list))
                 event_sec = event["eventSec"]
 
                 if stats["last_event_time"] is not None:
@@ -194,12 +194,17 @@ def run():
                 if event_name == "shot":
                     if side == "home":
                         cumulative_stats["home_shots"] += 1
-                        if "accurate" in tags_list:
+                        if "1801" in tags_list:
                             cumulative_stats["home_accurate_shots"] += 1
+                            if "101" in tags_list:
+                                cumulative_stats["home_goals"] += 1
+                             
                     elif side == "away":
                         cumulative_stats["away_shots"] += 1
-                        if "accurate" in tags_list:
+                        if "1801" in tags_list:
                             cumulative_stats["away_accurate_shots"] += 1
+                            if "101" in tags_list:
+                                cumulative_stats["away_goals"] += 1
                 elif event_name == "pass":
                     if side == "home":
                         cumulative_stats["home_passes"] += 1
@@ -210,16 +215,11 @@ def run():
                         cumulative_stats["home_fouls"] += 1
                     elif side == "away":
                         cumulative_stats["away_fouls"] += 1
-                elif event_name == "duel" and "won" in tags_list:
+                elif event_name == "duel" and "703" in tags_list:
                     if side == "home":
                         cumulative_stats["home_duels_won"] += 1
                     elif side == "away":
                         cumulative_stats["away_duels_won"] += 1
-                elif "goal" in tags_list and "accurate" in tags_list:
-                    if side == "home":
-                        cumulative_stats["home_goals"] += 1
-                    elif side == "away":
-                        cumulative_stats["away_goals"] += 1
 
                 diff_stats["goals_diff"] = cumulative_stats["home_goals"] - cumulative_stats["away_goals"]
                 diff_stats["passes_diff"] = cumulative_stats["home_passes"] - cumulative_stats["away_passes"]
@@ -344,7 +344,6 @@ def run():
             | "Generate Event ID" >> beam.Map(generate_event_id)
             | "Key by matchId" >> beam.Map(lambda event: (event['matchId'], event))
             | "Calculate Match Stats" >> beam.ParDo(MatchStatsFn())
-            | "Log Match Stats Output" >> beam.Map(lambda event: logging.info(f"Match Stats Output: {event}") or event)
         )
 
         match_stats | "Write Match Stats to BigQuery" >> WriteToBigQuery(
@@ -359,7 +358,6 @@ def run():
         predictions = (
             match_stats
             | "Predict with BigQuery ML" >> beam.ParDo(PredictWithBigQueryProbaFn(model_name=MODEL_NAME))
-            | "Log Predictions" >> beam.Map(lambda event: logging.info(f"Prediction: {event}") or event)
         )
 
         predictions | "Write Predictions to BigQuery" >> WriteToBigQuery(
