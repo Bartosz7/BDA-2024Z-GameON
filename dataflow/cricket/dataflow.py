@@ -115,8 +115,8 @@ def process_over(data):
     BUCKET_NAME = "bda-gameon-cricket-bucket"
     MATCH_HISTORY_FILE = "match_history.json"
     PREVIOUS_MATCH_ID_FILE = "previous_match_id.json"
-    MEAN_OVER_SCORE = {"1": 6, "2": 7}
-    MEAN_OVER_WICKETS = {"1": 0.5, "2": 1}
+    MEAN_OVER_SCORE = {"1": 7.61, "2": 7.29}
+    MEAN_OVER_WICKETS = {"1": 0.36, "2": 0.34}
 
     match_history = load_from_gcs(BUCKET_NAME, MATCH_HISTORY_FILE)
     previous_match_id = load_from_gcs(BUCKET_NAME, PREVIOUS_MATCH_ID_FILE).get("match_id")
